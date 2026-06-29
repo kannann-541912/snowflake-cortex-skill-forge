@@ -1,0 +1,19 @@
+{
+  "name": "de-pipeline-plugin",
+  "version": "1.0.0",
+  "description": "7-phase Snowflake data engineering pipeline: Profile → Schema Design → Schema Setup → Transform Setup → Load & Validate → Transform → Share. Hook-enforced phase ordering, artifact chain integrity, and shared client context.",
+  "skills": [
+    "skills/de-workflow",
+    "skills/de-profile",
+    "skills/de-schema-design",
+    "skills/de-schema-setup",
+    "skills/de-transform-setup",
+    "skills/de-load-validate",
+    "skills/de-transform",
+    "skills/de-share"
+  ],
+  "hooks": "hooks/hooks.json",
+  "references": "references/",
+  "state_file": "state/pipeline_state.json",
+  "requires": ["jq"]
+}

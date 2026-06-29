@@ -1,0 +1,43 @@
+{
+  "hooks": [
+    {
+      "name": "session-resume",
+      "event": "SessionStart",
+      "command": "bash hooks/pipeline-state.sh resume",
+      "description": "On every new session, read state/pipeline_state.json and inject current phase, completed artifacts, and next step into the agent context."
+    },
+    {
+      "name": "phase-order-gate",
+      "event": "PreToolUse",
+      "matcher": {
+        "skill": "de-profile|de-schema-design|de-schema-setup|de-transform-setup|de-load-validate|de-transform|de-share"
+      },
+      "command": "bash hooks/pipeline-state.sh check-order",
+      "description": "Hard gate: exits 2 (blocking) if the requested phase skill is invoked out of sequence. Agent cannot jump from Phase 1 to Phase 5."
+    },
+    {
+      "name": "refs-read-gate",
+      "event": "PreToolUse",
+      "matcher": {
+        "tool": "Write"
+      },
+      "command": "bash hooks/pipeline-state.sh check-refs",
+      "description": "Hard gate: exits 2 (blocking) if ../../references/client-context.md has not been read in this session. No file writes until context is loaded."
+    },
+    {
+      "name": "advance-state",
+      "event": "PostToolUse",
+      "matcher": {
+        "skill": "de-profile|de-schema-design|de-schema-setup|de-transform-setup|de-load-validate|de-transform|de-share"
+      },
+      "command": "bash hooks/pipeline-state.sh advance",
+      "description": "After any phase skill completes successfully, advance the phase counter in state.json and record the artifact path."
+    },
+    {
+      "name": "status-line",
+      "event": "Stop",
+      "command": "bash hooks/pipeline-state.sh status",
+      "description": "At the end of every turn, emit a status line: [de-pipeline] Phase: X/7 | Artifacts: Y | Next: Z"
+    }
+  ]
+}

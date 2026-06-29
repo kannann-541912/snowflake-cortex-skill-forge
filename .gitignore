@@ -1,0 +1,5 @@
+# Plugin runtime state files — contain session-specific state, not project config
+.cortex/plugins/*/state/pipeline_state.json
+
+# macOS
+.DS_Store

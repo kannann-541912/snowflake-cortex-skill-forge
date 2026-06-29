@@ -1,35 +1,81 @@
 # Snowflake Cortex Code Skill Forge
 
-> Production-grade custom skills for the Snowflake Cortex Code CLI — turning your AI assistant into a context-aware data engineering operating system.
+> Production-grade plugins and skills for the Snowflake Cortex Code CLI — turning your AI assistant into a context-aware data engineering operating system.
 
 ---
 
 ## What This Is
 
-This repository contains a curated set of custom skills for the [Snowflake Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code). Each skill is a structured `SKILL.md` file that teaches CoCo how to perform a specific data engineering task with Snowflake-native patterns, production conventions, and built-in quality gates.
+A curated collection of **plugins** and **skills** for the [Snowflake Cortex Code CLI](https://docs.snowflake.com/en/user-guide/cortex-code). Each unit teaches CoCo how to perform a specific data engineering task with Snowflake-native patterns, production conventions, and built-in quality gates.
 
-Skills are composable. They produce artifacts (`SQL` files, `YAML` mappings, Markdown reports) that feed into each other, allowing you to chain a complete data pipeline from a single conversation — or invoke individual phases on demand.
+**Plugins** wrap related skills into a single enforced unit. Hook-enforced gates make phase ordering, artifact chain integrity, and context-reading constraints impossible to bypass — not just requested.
 
-**The core idea:** your infrastructure shouldn't require a ticket, a whiteboard session, or a week of script writing. With the right skills loaded, CoCo becomes the context-aware development fabric your data team already needed.
+**Loose skills** handle single-purpose tasks where no phase ordering or shared state is needed.
+
+The core idea: your infrastructure shouldn't require a ticket, a whiteboard session, or a week of script writing. With the right skills loaded, CoCo becomes the context-aware development fabric your data team already needed.
 
 ---
 
-## Skills in This Repository
+## Plugins
 
-### AI-Accelerated Data Engineering Workflow
+### `de-pipeline-plugin` — Hook-Enforced 7-Phase DE Pipeline
 
-A phase-by-phase pipeline that takes a raw source from profile to governed mart — in hours, not weeks.
+The flagship plugin. Wraps all 8 DE workflow skills into a state-machine-governed pipeline.
+Phase ordering is a hard constraint — the agent physically cannot jump phases or write files before reading client context.
 
-| Skill | Invoke | What It Does |
+**Requires:** `jq`
+
+| Skill | Invoke | Phase |
 |---|---|---|
-| **de-workflow** | `$de-workflow` | Composable end-to-end orchestrator. Chains all 7 phases with quality gates. Supports full run, partial run, and resume. |
-| **de-profile** | `$de-profile` | Auto-profiles every column of a source table — null rates, cardinality, distributions, PII candidates, recommended primary keys. |
-| **de-schema-design** | `$de-schema-design` | Proposes a target schema from the profile: type mappings, SCD patterns, normalization, PII masking plan. |
-| **de-schema-setup** | `$de-schema-setup` | Generates and deploys idempotent DDL — tables, masking policies, lineage tags. Governance by default. Includes a **mandatory confirmation gate** before any DDL executes. |
-| **de-transform-setup** | `$de-transform-setup` | Builds reusable column transform mappings, dbt staging model stubs, and Dynamic Table DDL from source-to-target mappings. |
-| **de-load-validate** | `$de-load-validate` | Loads data with a quarantine pattern, row-count reconciliation, null assertions, and a Snowflake alert on every load. Includes a **mandatory confirmation gate** before any INSERT. |
-| **de-transform** | `$de-transform` | Applies business transforms via Dynamic Tables or Stream+Task MERGE. Self-healing: detects failures, resumes, runs post-transform assertions. |
-| **de-share** | `$de-share` | Configures role-based access and sharing by default: functional RBAC roles, least-privilege grants, Row Access Policies, and optional cross-account data shares. |
+| **de-workflow** | `$de-workflow` | Orchestrator — chains all 7 phases with quality gates |
+| **de-profile** | `$de-profile` | 1 — Auto-profiles every column: null rates, cardinality, PII candidates |
+| **de-schema-design** | `$de-schema-design` | 2 — Proposes target schema: type mappings, SCD patterns, masking plan |
+| **de-schema-setup** | `$de-schema-setup` | 3 — Generates and deploys idempotent DDL with governance by default |
+| **de-transform-setup** | `$de-transform-setup` | 4 — Builds column transform mappings, dbt stubs, Dynamic Table DDL |
+| **de-load-validate** | `$de-load-validate` | 5 — Loads data with quarantine, row-count reconciliation, and quality alerts |
+| **de-transform** | `$de-transform` | 6 — Applies business transforms via Dynamic Tables or Stream+Task MERGE |
+| **de-share** | `$de-share` | 7 — Configures RBAC, Row Access Policies, and optional cross-account shares |
+
+**What the hooks enforce:**
+
+| Event | Gate |
+|---|---|
+| `SessionStart` | Reads `state/pipeline_state.json`, injects current phase + artifact chain into context |
+| `PreToolUse` (skill) | **Exits 2** if a phase is invoked out of order |
+| `PreToolUse` (Write) | **Exits 2** if `references/client-context.md` hasn't been read |
+| `PostToolUse` (skill) | Advances phase counter + records artifact in state file |
+| `Stop` | Prints `[de-pipeline] Phase: X/7 | Completed: N | Next: $skill` every turn |
+
+**Pipeline flow:**
+
+```
+$de-profile          →  profile_report.md
+    ↓  [Quality Gate 1: non-empty, PII & PK identified]
+
+$de-schema-design    →  schema_design.md
+    ↓  [Quality Gate 2: all columns mapped, NOT NULL constraints viable]
+
+$de-schema-setup     →  schema_setup.sql  +  Snowflake objects deployed
+    ↓  [⚠️ Mandatory Stop: user confirms DDL before execution]
+    ↓  [Quality Gate 3: tables exist, masking policies applied, lineage tagged]
+
+$de-transform-setup  →  transform_mappings.yml  +  dbt models  +  Dynamic Table DDL
+    ↓  [Quality Gate 4: 100-row sample test, 0 null violations]
+
+$de-load-validate    →  rows loaded  +  quarantine table  +  quality alert
+    ↓  [⚠️ Mandatory Stop: user confirms target before INSERT]
+    ↓  [Quality Gate 5: rows loaded > 0, rejection rate < 5%]
+
+$de-transform        →  populated mart table  +  running Dynamic Table / Task
+    ↓  [Quality Gate 6: row delta < 5%, no critical nulls, freshness OK]
+
+$de-share            →  RBAC grants  +  governance_report.md
+         [Quality Gate 7: PII masked for consumer role, governance documented]
+```
+
+---
+
+## Standalone Skills
 
 ### Platform Scaffolding
 
@@ -51,128 +97,53 @@ A phase-by-phase pipeline that takes a raw source from profile to governed mart 
 
 ---
 
-## The End-to-End DE Workflow
-
-```
-$de-profile          →  profile_report.md
-    ↓  [Quality Gate 1: non-empty, PII & PK identified]
-
-$de-schema-design    →  schema_design.md
-    ↓  [Quality Gate 2: all columns mapped, NOT NULL constraints viable]
-
-$de-schema-setup     →  schema_setup.sql  +  Snowflake objects deployed
-    ↓  [⚠️ Mandatory Stop: user confirms DDL before execution]
-    ↓  [Quality Gate 3: tables exist, masking policies applied, lineage tagged]
-
-$de-transform-setup  →  transform_mappings.yml  +  dbt models  +  Dynamic Table DDL
-    ↓  [Quality Gate 4: 100-row sample test passes, 0 null violations]
-
-$de-load-validate    →  rows loaded  +  quarantine table  +  quality alert
-    ↓  [⚠️ Mandatory Stop: user confirms target before INSERT]
-    ↓  [Quality Gate 5: rows loaded > 0, rejection rate < 5%]
-
-$de-transform        →  populated mart table  +  running Dynamic Table / Task
-    ↓  [Quality Gate 6: row delta < 5%, no critical nulls, freshness OK]
-
-$de-share            →  RBAC grants  +  governance_report.md
-    ↓  [Quality Gate 7: PII masked for consumer role, governance documented]
-```
-
-Run the whole thing with one command:
-
-```
-> $de-workflow Build a pipeline from SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS into SANDBOX.TPCH
-```
-
-Or run any phase standalone — each skill has its own quality gate you can run independently:
-
-```
-> $de-profile Profile SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.LINEITEM
-> $de-transform-setup Build transforms for ORDERS → SANDBOX.TPCH.STG_ORDERS
-> $de-workflow resume
-```
-
----
-
 ## Repository Structure
 
 ```
 snowflake-cortex-skill-forge/
 ├── AGENTS.md                              # Global conventions — loaded by CoCo on every session
 ├── README.md
+├── CONTRIBUTING.md                        # Skill authoring guide & PR process
+├── .gitignore
 │
 └── .cortex/
-    └── skills/
-        │
-        ├── 00-de-workflow/                # Orchestrates phases 01–07 end-to-end
-        │   └── SKILL.md
-        │
-        ├── 01-profile/                    # Phase 1 — Source profiling
-        │   └── SKILL.md
-        │
-        ├── 02-schema-design/              # Phase 2 — Target schema design
-        │   └── SKILL.md
-        │
-        ├── 03-schema-setup/               # Phase 3 — DDL generation & deployment
-        │   └── SKILL.md                   # ⚠️ Mandatory stop before DDL execution
-        │
-        ├── 04-transform-setup/            # Phase 4 — Transform mappings & dbt stubs
-        │   └── SKILL.md
-        │
-        ├── 05-load-validate/              # Phase 5 — Load + quarantine + quality gates
-        │   └── SKILL.md                   # ⚠️ Mandatory stop before INSERT
-        │
-        ├── 06-transform/                  # Phase 6 — Dynamic Tables / Stream+Task MERGE
-        │   └── SKILL.md
-        │
-        ├── 07-share/                      # Phase 7 — RBAC + governance report
-        │   └── SKILL.md
-        │
-        ├── snowflake-project-scaffolder/  # New project scaffold (DataOps + AgentOps + CI/CD)
-        │   ├── SKILL.md                   # ~120 lines — concise entrypoint
-        │   └── references/
-        │       ├── 01-root-files.md       # manifest, .gitignore, README, config.toml
-        │       ├── 02-sources-dcm.md      # DCM table/view/infra/access definitions
-        │       ├── 03-ingestion.md        # Streams, Tasks, COPY INTO, Snowpark, Openflow
-        │       ├── 04-dbt-layer.md        # dbt_project.yml, profiles, packages, model stubs
-        │       ├── 05-agentops.md         # deploy_all.py, run_evals.py, agent stub
-        │       ├── 06-scripts.md          # check_naming.py, deploy_agent.py, validate_spec.py
-        │       ├── 07-cicd.md             # validate.yml, deploy.yml GitHub Actions
-        │       ├── 08-mlops.md            # MLOps pillar (optional)
-        │       └── 09-dashboards.md       # Streamlit dashboards pillar (optional)
-        │
-        ├── snowflake-project-builder/     # Reverse-engineer live objects → project files
-        │   ├── SKILL.md                   # ~118 lines — concise entrypoint
-        │   └── references/
-        │       ├── 01-planning.md         # Discovery, introspection, classification, conflict check
-        │       ├── 02-dcm-definitions.md  # TABLE, VIEW, WAREHOUSE, ROLE DEFINE blocks
-        │       ├── 03-ingestion-objects.md# STAGE, STREAM, TASK, PIPE templates
-        │       ├── 04-procedural-objects.md # PROC, UDF, DMF, DT, ALERT, POLICY, TAG, SECRET
-        │       ├── 05-dbt-models.md       # Staging & mart model + sources YAML
-        │       ├── 06-agentops-scaffold.md# agent.yml, system_prompt, evals, monitoring
-        │       ├── 07-mlops-scaffold.md   # spec.yml, model_card, SQL, lifecycle, runbooks
-        │       └── 08-conventions.md      # Naming, templating, file org reference
-        │
-        ├── dbt-expectations-generator/    # Auto-generate dbt-expectations tests from real data
+    │
+    ├── plugins/                           # Hook-enforced multi-skill workflows
+    │   └── de-pipeline-plugin/
+    │       ├── .cortex-plugin/
+    │       │   └── plugin.json            # Plugin manifest — lists 8 skills, hooks, references
+    │       ├── hooks/
+    │       │   ├── hooks.json             # 5 hook event wires
+    │       │   └── pipeline-state.sh      # State machine (bash 3+, requires jq)
+    │       ├── references/
+    │       │   └── client-context.md      # Shared config for all 8 phase skills
+    │       ├── skills/
+    │       │   ├── de-workflow/SKILL.md
+    │       │   ├── de-profile/SKILL.md
+    │       │   ├── de-schema-design/SKILL.md
+    │       │   ├── de-schema-setup/SKILL.md
+    │       │   ├── de-transform-setup/SKILL.md
+    │       │   ├── de-load-validate/SKILL.md
+    │       │   ├── de-transform/SKILL.md
+    │       │   └── de-share/SKILL.md
+    │       └── state/
+    │           └── pipeline_state.json    # Runtime state — gitignored
+    │
+    └── skills/                            # Standalone loose skills
+        ├── snowflake-project-scaffolder/
         │   ├── SKILL.md
-        │   └── references/
-        │       ├── 01-test-selection-logic.md  # Signal→test mapping table + tolerances
-        │       └── 02-test-reference.md         # Full dbt-expectations test catalogue + regex
-        │
-        ├── airflow-dag-generator/         # Airflow DAG for dbt models (Cosmos / BashOperator)
-        │   └── SKILL.md
-        │
-        ├── dbt-jinja-builder/             # dbt model + schema.yml + sources.yml scaffolder
-        │   └── SKILL.md
-        │
-        ├── dmf-generator/                 # Snowflake Data Metric Function generator
-        │   └── SKILL.md
-        │
-        ├── great-expectations-suite-generator/  # GX v1.x suite from live Snowflake profiling
-        │   └── SKILL.md
-        │
-        └── informatica-to-dbt/            # Informatica PowerCenter/IDMC → dbt migration
-            └── SKILL.md
+        │   └── references/               # 9 reference files (root files → dashboards)
+        ├── snowflake-project-builder/
+        │   ├── SKILL.md
+        │   └── references/               # 8 reference files (planning → conventions)
+        ├── dbt-expectations-generator/
+        │   ├── SKILL.md
+        │   └── references/               # test-selection-logic + test-reference
+        ├── airflow-dag-generator/SKILL.md
+        ├── dbt-jinja-builder/SKILL.md
+        ├── dmf-generator/SKILL.md
+        ├── great-expectations-suite-generator/SKILL.md
+        └── informatica-to-dbt/SKILL.md
 ```
 
 ---
@@ -183,211 +154,153 @@ snowflake-cortex-skill-forge/
 
 - Snowflake account with Cortex Code CLI enabled
 - Snowflake CLI installed: `pip install snowflake-cli`
+- `jq` installed (required for the DE pipeline plugin hooks): `brew install jq`
 - Access to a writable database (e.g. `SANDBOX.TPCH`)
-- `config.toml` configured with your connection (see `config.toml.example` in scaffolded projects)
 
 ### Installation
 
-There are three ways to install these skills depending on how broadly you want them available.
+#### Option 1 — Global install (recommended)
 
----
-
-#### Option 1 — Global install (skills available in every CoCo session)
-
-This is the recommended approach. Skills installed globally are available regardless of which directory you run CoCo from.
-
-**Step 1: Clone this repository**
+Skills and plugins installed globally are available in every CoCo session, regardless of working directory.
 
 ```bash
 git clone https://github.com/kannann-541912/snowflake-cortex-skill-forge.git
 cd snowflake-cortex-skill-forge
-```
 
-**Step 2: Create the global skills directory if it doesn't exist**
-
-```bash
+# Install standalone skills globally
 mkdir -p ~/.snowflake/cortex/skills
-```
-
-**Step 3: Copy all skills into it**
-
-```bash
 cp -r .cortex/skills/* ~/.snowflake/cortex/skills/
-```
 
-Your `~/.snowflake/cortex/skills/` directory will now look like this:
+# Install the DE pipeline plugin globally
+mkdir -p ~/.snowflake/cortex/plugins
+cp -r .cortex/plugins/de-pipeline-plugin ~/.snowflake/cortex/plugins/
 
-```
-~/.snowflake/cortex/skills/
-├── 00-de-workflow/
-│   └── SKILL.md
-├── 01-profile/
-│   └── SKILL.md
-├── 02-schema-design/
-│   └── SKILL.md
-├── 03-schema-setup/
-│   └── SKILL.md
-├── 04-transform-setup/
-│   └── SKILL.md
-├── 05-load-validate/
-│   └── SKILL.md
-├── 06-transform/
-│   └── SKILL.md
-├── 07-share/
-│   └── SKILL.md
-├── snowflake-project-scaffolder/
-├── snowflake-project-builder/
-├── dbt-expectations-generator/
-├── airflow-dag-generator/
-├── dbt-jinja-builder/
-├── dmf-generator/
-├── great-expectations-suite-generator/
-└── informatica-to-dbt/
-```
-
-**Step 4: Start a CoCo session from any directory**
-
-```bash
+# Start a session from any directory
 snow cortex run
 ```
 
----
+#### Option 2 — Project-level install
 
-#### Option 2 — Project-level install (skills available in this project only)
-
-CoCo auto-discovers skills in `.cortex/skills/` relative to the working directory. If you clone this repo and run CoCo from inside it, no extra steps are needed:
+CoCo auto-discovers skills in `.cortex/skills/` and plugins in `.cortex/plugins/` relative to the working directory. If you clone this repo and run CoCo from inside it, no extra steps are needed:
 
 ```bash
 git clone https://github.com/kannann-541912/snowflake-cortex-skill-forge.git
 cd snowflake-cortex-skill-forge
 snow cortex run
 ```
-
----
 
 #### Option 3 — Copy into an existing project
-
-To bring these skills into a project you already have:
 
 ```bash
 cp -r .cortex /path/to/your/snowflake-project/
 cp AGENTS.md /path/to/your/snowflake-project/
 ```
 
-Then run CoCo from that project directory — skills in `.cortex/skills/` are picked up automatically.
+### First-time DE Pipeline Setup
 
----
+Before running the plugin for the first time, fill in your client context and initialise the state file:
 
-### Verify the skills loaded
+```bash
+# 1. Edit the shared client context
+open .cortex/plugins/de-pipeline-plugin/references/client-context.md
 
-Inside a running CoCo session, list all available skills:
+# 2. Initialise the state machine
+bash .cortex/plugins/de-pipeline-plugin/hooks/pipeline-state.sh init
+
+# 3. Start CoCo and invoke the pipeline
+snow cortex run
+> $de-workflow Build a pipeline from SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS into SANDBOX.TPCH
+```
+
+### Verifying Skills and Plugins Loaded
+
+Inside a running CoCo session:
 
 ```
 > /skill list
 ```
 
-You should see all skills labelled as `[G] Global` (from `~/.snowflake/cortex/skills/`) or `[P] Project` (from `.cortex/skills/`):
-
+Expected output:
 ```
-[G] Global   de-workflow                 Composable DE orchestrator — chains all 7 phases
-[G] Global   de-profile                  Auto-profiles every column of a source table
-[G] Global   de-schema-design            Proposes target schema from a profile report
-[G] Global   de-schema-setup             Generates and deploys idempotent DDL
-[G] Global   de-transform-setup          Builds column transform mappings and dbt stubs
-[G] Global   de-load-validate            Loads data with quarantine and quality gates
-[G] Global   de-transform                Applies business transforms via Dynamic Tables
-[G] Global   de-share                    Configures RBAC and optional cross-account shares
-[G] Global   snowflake-project-scaffolder  Scaffolds a new Snowflake platform repo
-[G] Global   snowflake-project-builder   Reverse-engineers live objects into project files
-[G] Global   airflow-dag-generator       Generates production Airflow DAG for dbt + Snowflake
-[G] Global   dbt-expectations-generator  Auto-generates dbt-expectations tests from real data
-[G] Global   dbt-jinja-builder           Scaffolds dbt model + schema.yml + sources.yml
-[G] Global   dmf-generator               Generates Snowflake Data Metric Functions
-[G] Global   great-expectations-suite-generator  GX v1.x suite from live Snowflake profiling
-[G] Global   informatica-to-dbt          Migrates Informatica XML exports to a dbt project
-```
-
-To inspect a specific skill's description and trigger phrases:
-
-```
-> /skill de-profile
+[P] Project  de-workflow                         DE pipeline orchestrator (plugin)
+[P] Project  de-profile                          Phase 1 — source profiling (plugin)
+[P] Project  de-schema-design                    Phase 2 — schema design (plugin)
+[P] Project  de-schema-setup                     Phase 3 — DDL deployment (plugin)
+[P] Project  de-transform-setup                  Phase 4 — transform mappings (plugin)
+[P] Project  de-load-validate                    Phase 5 — load & validate (plugin)
+[P] Project  de-transform                        Phase 6 — business transforms (plugin)
+[P] Project  de-share                            Phase 7 — RBAC & governance (plugin)
+[P] Project  snowflake-project-scaffolder        New project scaffold
+[P] Project  snowflake-project-builder           Reverse-engineer live objects
+[P] Project  airflow-dag-generator               Airflow DAG for dbt + Snowflake
+[P] Project  dbt-expectations-generator          Auto-generate dbt tests from real data
+[P] Project  dbt-jinja-builder                   dbt model + schema.yml + sources.yml
+[P] Project  dmf-generator                       Snowflake Data Metric Functions
+[P] Project  great-expectations-suite-generator  GX v1.x suite from live profiling
+[P] Project  informatica-to-dbt                  Informatica XML → dbt project
 ```
 
----
-
-### Invoking Skills with `/skill`
-
-Once loaded, skills are invoked by natural language — CoCo matches your request to the right skill automatically. The `/skill` command lets you invoke or inspect skills explicitly.
-
-**Invoke a skill directly by name:**
+### Invoking Skills
 
 ```
-> /skill de-profile Profile SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS
-```
+# Full end-to-end pipeline (hook-governed)
+> $de-workflow Build a pipeline from SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS into SANDBOX.TPCH
 
-**Invoke via natural language (CoCo picks the skill automatically):**
+# Partial run — start from a specific phase
+> $de-workflow start-from schema-setup
 
-```
-> Profile the ORDERS table and identify PII columns
-> Design a target schema for TPCH_SF10.LINEITEM in SANDBOX
-> Generate dbt-expectations tests for SANDBOX.TPCH.MART_REVENUE
-```
+# Resume after a context reset
+> $de-workflow resume
 
-**Run the full end-to-end DE pipeline:**
+# Run individual phases
+> $de-profile Profile SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.LINEITEM
+> $de-transform-setup Build transforms for ORDERS → SANDBOX.TPCH.STG_ORDERS
 
-```
-> /skill de-workflow Build a pipeline from SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS into SANDBOX.TPCH
-```
-
-**Run a specific phase standalone:**
-
-```
-> /skill de-profile Profile SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.LINEITEM
-> /skill de-transform-setup Build transforms for ORDERS → SANDBOX.TPCH.STG_ORDERS
-> /skill de-workflow resume
-```
-
-**Reference a skill in any message using `$skill-name` shorthand:**
-
-```
-> $de-profile Profile the LINEITEM table
-> $dbt-jinja-builder Scaffold models for SANDBOX.TPCH.STG_ORDERS
+# Standalone skills
 > $snowflake-project-scaffolder Create a new project with DataOps and AgentOps pillars
+> $dbt-expectations-generator Generate tests for SANDBOX.TPCH.MART_ORDERS_ENRICHED
 ```
 
----
+### State Machine Commands
+
+The DE pipeline plugin ships with a CLI for managing pipeline state:
+
+```bash
+cd .cortex/plugins/de-pipeline-plugin
+
+bash hooks/pipeline-state.sh status          # Show current phase and progress
+bash hooks/pipeline-state.sh resume          # Inject state into a new session
+bash hooks/pipeline-state.sh mark-refs-read  # Unblock the Write gate after reading context
+bash hooks/pipeline-state.sh reset           # Reset to Phase 0 (new pipeline run)
+```
 
 ### Keeping Skills Up to Date
-
-To pull the latest skills after changes are published to this repo:
 
 ```bash
 cd snowflake-cortex-skill-forge
 git pull
 cp -r .cortex/skills/* ~/.snowflake/cortex/skills/
+cp -r .cortex/plugins/de-pipeline-plugin ~/.snowflake/cortex/plugins/
 ```
 
 ---
 
 ## AGENTS.md — Global Conventions
 
-`AGENTS.md` is the backbone of consistent skill behaviour. Every CoCo session in this project inherits it without any skill having to repeat the information.
-
-It defines:
+`AGENTS.md` is loaded by CoCo at the start of every session in this project. All skills and plugins inherit these conventions without having to re-declare them.
 
 | Section | What It Covers |
 |---|---|
 | **Identity and Role** | Agent persona — Snowflake DE SME, not a generic SQL generator |
-| **Environment** | Source DB (`SNOWFLAKE_SAMPLE_DATA.TPCH_SF10`, read-only), target DB (`SANDBOX.TPCH`), warehouse defaults |
+| **Environment** | Source DB (`SNOWFLAKE_SAMPLE_DATA.TPCH_SF10`, read-only), target DB (`SANDBOX.TPCH`), warehouse |
 | **TPCH Source Catalogue** | All 8 tables with PKs, FKs, row counts, and sampling guidance |
-| **Naming Conventions** | UPPER_SNAKE_CASE objects, `STG_*`/`MART_*`/`MASK_*`/`RAP_*`/`DMF_*` prefixes |
+| **Naming Conventions** | `UPPER_SNAKE_CASE` objects, `STG_*`/`MART_*`/`MASK_*`/`RAP_*` prefixes |
 | **Standard Audit Columns** | `_LOADED_AT`, `_SOURCE_SYSTEM`, SCD2 columns — added to every table |
 | **Quality Thresholds** | Quarantine rate, row delta, null rate, freshness thresholds with STOP/WARN actions |
 | **DDL Rules** | `CREATE IF NOT EXISTS` only, governance-at-creation, clustering key guidance |
-| **Type Mapping** | Source pattern → Snowflake type reference |
 | **RBAC Role Hierarchy** | `DE_CONSUMER_ROLE`, `DE_ANALYST_ROLE`, `DE_ENGINEER_ROLE` with grant rules |
 | **Artifact Chain** | The file sequence connecting all 7 DE phases |
-| **TPCH Gotchas** | Known failure modes: static streams, FLOAT prices, composite PKs |
+| **TPCH Gotchas** | Static streams, FLOAT prices, composite PKs |
 
 **Adapting for your environment:** Change the source/target databases, adjust naming conventions, update quality thresholds to match your SLAs, and replace the TPCH catalogue with your own source schema.
 
@@ -395,319 +308,39 @@ It defines:
 
 ## Design Principles
 
-**Composability over monoliths.** Each skill is a standalone unit that produces a documented artifact. Skills are chained by the orchestrator but always run independently.
+**Plugins over loose skills for complex workflows.** When 4+ skills share phase ordering, artifact dependencies, or reference documents, a plugin with hook enforcement beats markdown instructions every time. Instructions are requests. Hooks are constraints.
 
-**Progressive disclosure.** Large skills use a concise `SKILL.md` (≤ 200 lines) as the entrypoint and load heavy content from `references/` files on demand — keeping the context window lean and fast.
+**Composability over monoliths.** Each skill is a standalone unit producing a documented artifact. Skills are chained by the orchestrator but always runnable independently.
+
+**Progressive disclosure.** Large skills use a concise `SKILL.md` (≤ 200 lines) as the entrypoint and load heavy content from `references/` files on demand — keeping the context window lean.
 
 **Quality gates between every phase.** Skills don't silently proceed on failure. Every phase checks its own output before advancing, reports what went wrong, and offers recovery options.
 
-**Mandatory stopping points for irreversible actions.** DDL execution and bulk INSERTs require explicit human confirmation — even if the user has approved the plan earlier in the session.
+**Mandatory stopping points for irreversible actions.** DDL execution and bulk INSERTs require explicit human confirmation — even if the user approved the plan earlier in the session.
 
-**Governance by default.** Masking policies, lineage tags, and RBAC roles are applied at object creation — not as an afterthought.
+**Governance by default.** Masking policies, lineage tags, and RBAC roles are applied at object creation — never as an afterthought.
 
 **Idempotent DDL.** All generated SQL uses `CREATE ... IF NOT EXISTS`. Running a skill twice on the same environment is always safe.
 
-**Artifact-driven context.** Skills communicate through files (`profile_report.md`, `schema_design.md`, `transform_mappings.yml`) so context survives session boundaries and can be version-controlled.
-
----
-
-## Building a New Skill — Best Practices Guide
-
-This section covers everything you need to know to contribute a production-grade skill to this repository (or build one from scratch for your own project).
-
-### Anatomy of a Skill
-
-Every skill is a folder with a required `SKILL.md` and optional supporting files:
-
-```
-my-skill-name/
-├── SKILL.md          ← Required. The skill entrypoint.
-└── references/       ← Optional. Heavy content loaded on demand.
-    ├── 01-topic-a.md
-    └── 02-topic-b.md
-```
-
-### SKILL.md Structure
-
-```markdown
----
-name: my-skill-name
-description: >
-  One-to-three sentences the runtime uses for skill matching.
-  Include natural-language trigger phrases: "when user says X, Y, Z".
-  Make it specific enough to avoid false activations.
-parent_skill: parent-skill-name   # Optional — for sub-skills in a hierarchy
-tools:
-  - snowflake_sql_execute
-  - Read
-  - Write
----
-
-# My Skill Title
-
-## Domain Context
-[Who the agent is and what expertise it brings. 3–5 sentences.]
-[Includes a behavioral directive: "produce complete X, never Y".]
-
-## When to Use
-- [Concrete trigger scenario 1]
-- [Trigger phrases: "user says X, Y, Z"]
-
-## When NOT to Use
-- [Out-of-scope scenario 1] → direct to the right skill instead
-- [Scenario that looks similar but isn't] → redirect with reason
-
-## Gotchas
-- [Non-obvious failure mode or constraint — one line each]
-- [Ordering dependency, API quirk, naming pitfall]
-
-## Phase 1 — [Phase Name] (mandatory gate)
-
-⚠️ **MANDATORY STOPPING POINT** — [only for irreversible actions]
-[Enumerate what must be confirmed before proceeding]
-
-[Phase instructions...]
-
-## Phase 2 — [Phase Name]
-
-For heavy content, link to a reference file:
-Read [references/01-topic.md](references/01-topic.md) for [what it contains].
-
-## Standalone Quality Gate
-[SQL or bash to verify this skill completed successfully]
-```
-
----
-
-### Naming Rules
-
-| Rule | Detail |
-|---|---|
-| Skill name | `lowercase-kebab-case` — no spaces, no underscores |
-| Reserved words | Never use: `claude`, `cursor`, `cortex`, `snowflake` as the **first** word |
-| Folder name | Must exactly match the `name:` field in frontmatter |
-| Snowflake objects | `UPPER_SNAKE_CASE` — tables, views, roles, policies |
-| dbt models | `lowercase_snake_case` — `stg_orders`, `fct_revenue` |
-
----
-
-### The `description:` Field — Write It for the Matcher
-
-The description is how the runtime decides which skill to invoke. It is not a user-facing label. Write it to match natural user phrasing:
-
-```yaml
-# Bad — too abstract
-description: "Handles data engineering tasks."
-
-# Good — specific + includes trigger phrases
-description: >
-  Generate Snowflake Data Metric Functions for automated data quality monitoring.
-  Use when: add DMFs, create data metric functions, set up quality monitoring,
-  add data quality checks, attach DMF to table.
-```
-
-Include 5–10 natural-language trigger phrases as a comma-separated list after "Use when:".
-
----
-
-### Progressive Disclosure — Keep SKILL.md Lean
-
-The single biggest performance lever in skill design. The SKILL.md is loaded in full for every invocation. Every line costs tokens.
-
-**Target sizes:**
-- `SKILL.md`: ≤ 200 lines for a focused skill, ≤ 400 lines for a complex orchestrator
-- `references/*.md`: no hard limit — loaded on demand only when needed
-
-**What stays in `SKILL.md`:** phases, decision logic, short SQL patterns, stopping points, quality gates
-
-**What moves to `references/`:** large SQL templates, 40+ row lookup tables, complete file templates, full test catalogues, detailed runbooks
-
-Reference files are loaded by instruction in the skill body:
-```markdown
-Read [references/01-test-selection-logic.md](references/01-test-selection-logic.md)
-for the complete test selection table before generating tests.
-```
-
-This pattern reduces context window usage by 60–80% compared to monolithic skills.
-
----
-
-### Required Sections Checklist
-
-Every skill in this repository must have these sections. Run this checklist before submitting a PR:
-
-```
-[ ] name: field — lowercase-kebab-case, no reserved words
-[ ] description: field — includes 5+ natural trigger phrases
-[ ] parent_skill: field — if this is a sub-skill of an orchestrator
-[ ] tools: field — minimum necessary tool list
-[ ] Domain Context — who the agent is + behavioral directive
-[ ] When to Use — 3+ concrete triggers
-[ ] When NOT to Use — 2+ explicit out-of-scope cases with redirects
-[ ] Gotchas — 3+ non-obvious failure modes or constraints
-[ ] SKILL.md ≤ 400 lines — heavy content in references/ files
-[ ] ⚠️ MANDATORY STOPPING POINT — before any irreversible action (DDL, bulk INSERT, deploy)
-[ ] Standalone Quality Gate — SQL/bash to verify the skill ran successfully
-```
-
----
-
-### Domain Context — Give the Agent a Persona
-
-The Domain Context section shapes everything the agent produces. Without it, responses are generic. With it, the agent reasons like a specialist.
-
-```markdown
-## Domain Context
-You are a Snowflake schema architect specializing in idempotent, governance-by-default
-DDL deployment. You know every Snowflake object type, which belong in DCM vs imperative
-SQL, and how to apply masking policies and lineage tags at object creation time — never
-as afterthoughts.
-
-Behavioral directive: produce complete, runnable DDL files — never stubs with TODOs.
-```
-
-**Pattern:** `You are a [role] specializing in [domain].` + 1–2 sentences of expert knowledge + 1 behavioral directive.
-
----
-
-### When NOT to Use — Prevent False Activations
-
-This section is as important as "When to Use". Without it, the agent will attempt tasks it's not suited for.
-
-```markdown
-## When NOT to Use
-- User wants to profile data first → run `de-profile` before this skill
-- User only wants to view the schema, not deploy → describe it in plain text
-- User's target is SNOWFLAKE_SAMPLE_DATA → abort immediately, it's read-only
-```
-
-For each case, name the better alternative if one exists.
-
----
-
-### Gotchas — Document What Breaks
-
-Gotchas are concise, factual statements about failure modes the agent must know. They prevent the most common categories of errors:
-
-```markdown
-## Gotchas
-- Never use CREATE OR REPLACE TABLE — it destroys data. Always CREATE TABLE IF NOT EXISTS.
-- Deploy order: masking policies → tables → views → row access policies. Never reverse.
-- Streams on SNOWFLAKE_SAMPLE_DATA always show 0 rows — it's a static dataset.
-- Tasks are SUSPENDED by default — always ALTER TASK ... RESUME after creation.
-```
-
-**Sources for gotchas:** your own debugging sessions, known API quirks, ordering dependencies, naming constraints, and anything you've had to look up twice.
-
----
-
-### Mandatory Stopping Points — Protect Against Irreversible Actions
-
-Add a stopping point before any action that cannot be undone:
-
-```markdown
-⚠️ **MANDATORY STOPPING POINT** — Before executing any CREATE/ALTER statement:
-1. Show the user the complete DDL that will be executed.
-2. Verify the target path does NOT start with SNOWFLAKE_SAMPLE_DATA.
-3. Wait for explicit user confirmation before proceeding.
-```
-
-Use these for: DDL execution, bulk data loads, agent/model deployments, any destructive operation.
-
----
-
-### Standalone Quality Gates — Enable Independent Invocation
-
-Every phase skill should be independently verifiable. A quality gate is a SQL or bash snippet that confirms the phase completed correctly, without requiring the full workflow context:
-
-```markdown
-## Standalone Quality Gate
-```sql
-SELECT COUNT(*) AS rows_loaded, MAX(_LOADED_AT) AS last_load
-FROM SANDBOX.TPCH.STG_ORDERS;
--- Expected: rows_loaded > 0, last_load within the last hour
-```
-```
-
-This enables:
-- Resuming a workflow from the middle
-- Debugging a specific phase in isolation
-- CI/CD verification steps
-
----
-
-### Sub-Skills and `parent_skill`
-
-When a skill is a logical component of a larger orchestrating skill, declare the relationship:
-
-```yaml
----
-name: de-profile
-parent_skill: de-workflow   # ← links this to the orchestrator
----
-```
-
-This enables hierarchical discovery: CoCo can navigate from the parent to the sub-skill and back, and users can see the full skill tree with `/skill list`.
-
----
-
-### Tools — Minimum Necessary
-
-Request only the tools your skill actually uses. Unnecessary tool declarations expand the permission surface and slow down invocations.
-
-| Tool | When to Include |
-|---|---|
-| `snowflake_sql_execute` | Any skill that runs SQL |
-| `snowflake_object_search` | Any skill that needs to discover Snowflake objects |
-| `Read` | Any skill that reads local files (YAML, SQL, Markdown) |
-| `Write` | Any skill that creates or updates local files |
-| `Edit` | When in-place file edits are needed (vs full rewrites) |
-| `Bash` | For local CLI commands (dbt, git, snow, python scripts) |
-| `Glob` | For pattern-based file discovery |
-| `Grep` | For searching file contents |
-
----
-
-### Testing Your Skill Before Committing
-
-1. **Load check**: `snow cortex /skill list` — skill should appear with correct name
-2. **Trigger test**: describe your use case in natural language — skill should activate
-3. **Boundary test**: describe an out-of-scope case — skill should NOT activate (or should redirect)
-4. **Run it end-to-end** with at least one real invocation — all phases must complete without errors
-5. **Quality gate**: run the standalone quality gate SQL/bash and verify it returns expected results
-6. **Line count**: `wc -l SKILL.md` — should be ≤ 400 lines. If over, move content to `references/`
+**Artifact-driven context.** Skills communicate through files (`profile_report.md`, `schema_design.md`, `transform_mappings.yml`) so context survives session resets and can be version-controlled.
 
 ---
 
 ## Roadmap
 
-- [ ] `$de-lineage` — cross-system lineage view spanning Snowflake, dbt, and Airflow DAGs
+- [ ] `$de-lineage` — cross-system lineage spanning Snowflake, dbt, and Airflow DAGs
 - [ ] `$de-cost` — cost optimisation agent: clustering keys, idle warehouses, expensive queries
 - [ ] `$de-contract` — auto-generate dbt model contracts and YAML schemas from profile data
 - [ ] `$de-anomaly` — anomaly detection rules builder outputting Snowflake alerts and Soda checks
 - [ ] `$de-incident` — on pipeline failure, gather errors from Snowflake, Airflow, dbt, and Git, then propose a root cause hypothesis
+- [ ] `snowflake-project-plugin` — wrap project-builder + project-scaffolder with shared reference deduplication
+- [ ] `data-quality-plugin` — bundle dbt-expectations + great-expectations with unified trigger set
 
 ---
 
 ## Contributing
 
-Contributions are welcome. To add a new skill or improve an existing one:
-
-1. Fork the repository
-2. Create a branch: `git checkout -b skill/your-skill-name`
-3. Build your skill following the **Building a New Skill** guide above
-4. Run the required sections checklist before opening a PR
-5. Test the skill in a live CoCo session — include the `/skill list` output and at least one example invocation in your PR description
-6. Open a pull request with: what the skill does, what phase/category it belongs to, what artifacts it produces, and the trigger phrases in the description field
-
-**Quality bar for merging:**
-- ✓ Passes the required sections checklist
-- ✓ `SKILL.md` ≤ 400 lines
-- ✓ Has `When NOT to Use` with at least 2 redirects
-- ✓ Has `Gotchas` with at least 3 entries
-- ✓ Has a `Standalone Quality Gate`
-- ✓ All irreversible actions have a `⚠️ MANDATORY STOPPING POINT`
-- ✓ At least one successful end-to-end test run documented in the PR
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full skill authoring guide, required sections checklist, and PR process.
 
 ---
 
