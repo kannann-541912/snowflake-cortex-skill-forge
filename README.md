@@ -188,36 +188,184 @@ snowflake-cortex-skill-forge/
 
 ### Installation
 
-**Project-level** (skills available in this project only):
+There are three ways to install these skills depending on how broadly you want them available.
+
+---
+
+#### Option 1 — Global install (skills available in every CoCo session)
+
+This is the recommended approach. Skills installed globally are available regardless of which directory you run CoCo from.
+
+**Step 1: Clone this repository**
 
 ```bash
-git clone https://github.com/your-org/snowflake-cortex-skill-forge
+git clone https://github.com/kannann-541912/snowflake-cortex-skill-forge.git
 cd snowflake-cortex-skill-forge
+```
 
-# Skills are already in .cortex/skills/ — CoCo auto-discovers them
+**Step 2: Create the global skills directory if it doesn't exist**
+
+```bash
+mkdir -p ~/.snowflake/cortex/skills
+```
+
+**Step 3: Copy all skills into it**
+
+```bash
+cp -r .cortex/skills/* ~/.snowflake/cortex/skills/
+```
+
+Your `~/.snowflake/cortex/skills/` directory will now look like this:
+
+```
+~/.snowflake/cortex/skills/
+├── 00-de-workflow/
+│   └── SKILL.md
+├── 01-profile/
+│   └── SKILL.md
+├── 02-schema-design/
+│   └── SKILL.md
+├── 03-schema-setup/
+│   └── SKILL.md
+├── 04-transform-setup/
+│   └── SKILL.md
+├── 05-load-validate/
+│   └── SKILL.md
+├── 06-transform/
+│   └── SKILL.md
+├── 07-share/
+│   └── SKILL.md
+├── snowflake-project-scaffolder/
+├── snowflake-project-builder/
+├── dbt-expectations-generator/
+├── airflow-dag-generator/
+├── dbt-jinja-builder/
+├── dmf-generator/
+├── great-expectations-suite-generator/
+└── informatica-to-dbt/
+```
+
+**Step 4: Start a CoCo session from any directory**
+
+```bash
 snow cortex run
 ```
 
-**Copy to another project:**
+---
+
+#### Option 2 — Project-level install (skills available in this project only)
+
+CoCo auto-discovers skills in `.cortex/skills/` relative to the working directory. If you clone this repo and run CoCo from inside it, no extra steps are needed:
+
+```bash
+git clone https://github.com/kannann-541912/snowflake-cortex-skill-forge.git
+cd snowflake-cortex-skill-forge
+snow cortex run
+```
+
+---
+
+#### Option 3 — Copy into an existing project
+
+To bring these skills into a project you already have:
 
 ```bash
 cp -r .cortex /path/to/your/snowflake-project/
 cp AGENTS.md /path/to/your/snowflake-project/
 ```
 
-**Global** (skills available in every CoCo session):
+Then run CoCo from that project directory — skills in `.cortex/skills/` are picked up automatically.
 
-```bash
-cp -r .cortex/skills/* ~/.snowflake/cortex/skills/
-```
+---
 
-### Verify
+### Verify the skills loaded
+
+Inside a running CoCo session, list all available skills:
 
 ```
 > /skill list
 ```
 
-You should see all 16 skills listed as `[G] Global` or `[P] Project`.
+You should see all skills labelled as `[G] Global` (from `~/.snowflake/cortex/skills/`) or `[P] Project` (from `.cortex/skills/`):
+
+```
+[G] Global   de-workflow                 Composable DE orchestrator — chains all 7 phases
+[G] Global   de-profile                  Auto-profiles every column of a source table
+[G] Global   de-schema-design            Proposes target schema from a profile report
+[G] Global   de-schema-setup             Generates and deploys idempotent DDL
+[G] Global   de-transform-setup          Builds column transform mappings and dbt stubs
+[G] Global   de-load-validate            Loads data with quarantine and quality gates
+[G] Global   de-transform                Applies business transforms via Dynamic Tables
+[G] Global   de-share                    Configures RBAC and optional cross-account shares
+[G] Global   snowflake-project-scaffolder  Scaffolds a new Snowflake platform repo
+[G] Global   snowflake-project-builder   Reverse-engineers live objects into project files
+[G] Global   airflow-dag-generator       Generates production Airflow DAG for dbt + Snowflake
+[G] Global   dbt-expectations-generator  Auto-generates dbt-expectations tests from real data
+[G] Global   dbt-jinja-builder           Scaffolds dbt model + schema.yml + sources.yml
+[G] Global   dmf-generator               Generates Snowflake Data Metric Functions
+[G] Global   great-expectations-suite-generator  GX v1.x suite from live Snowflake profiling
+[G] Global   informatica-to-dbt          Migrates Informatica XML exports to a dbt project
+```
+
+To inspect a specific skill's description and trigger phrases:
+
+```
+> /skill de-profile
+```
+
+---
+
+### Invoking Skills with `/skill`
+
+Once loaded, skills are invoked by natural language — CoCo matches your request to the right skill automatically. The `/skill` command lets you invoke or inspect skills explicitly.
+
+**Invoke a skill directly by name:**
+
+```
+> /skill de-profile Profile SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS
+```
+
+**Invoke via natural language (CoCo picks the skill automatically):**
+
+```
+> Profile the ORDERS table and identify PII columns
+> Design a target schema for TPCH_SF10.LINEITEM in SANDBOX
+> Generate dbt-expectations tests for SANDBOX.TPCH.MART_REVENUE
+```
+
+**Run the full end-to-end DE pipeline:**
+
+```
+> /skill de-workflow Build a pipeline from SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.ORDERS into SANDBOX.TPCH
+```
+
+**Run a specific phase standalone:**
+
+```
+> /skill de-profile Profile SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.LINEITEM
+> /skill de-transform-setup Build transforms for ORDERS → SANDBOX.TPCH.STG_ORDERS
+> /skill de-workflow resume
+```
+
+**Reference a skill in any message using `$skill-name` shorthand:**
+
+```
+> $de-profile Profile the LINEITEM table
+> $dbt-jinja-builder Scaffold models for SANDBOX.TPCH.STG_ORDERS
+> $snowflake-project-scaffolder Create a new project with DataOps and AgentOps pillars
+```
+
+---
+
+### Keeping Skills Up to Date
+
+To pull the latest skills after changes are published to this repo:
+
+```bash
+cd snowflake-cortex-skill-forge
+git pull
+cp -r .cortex/skills/* ~/.snowflake/cortex/skills/
+```
 
 ---
 
